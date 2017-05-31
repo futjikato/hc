@@ -1,46 +1,138 @@
 package main
 
 import (
-	"github.com/shirou/gopsutil/load"
 	"github.com/shirou/gopsutil/disk"
-	"fmt"
+	"github.com/shirou/gopsutil/load"
+	"github.com/shirou/gopsutil/net"
+	"time"
 )
 
 type StatSet struct {
-	load float64
-	io_read float64
-	io_write float64
-	net float64
+	Ts time.Time `json:"time"`
+
+	Load         float64          `json:"load"`
+	IoRead       map[string]int64 `json:"io_read"`
+	IoReadTotal  int64            `json:"io_read_total"`
+	IoWrite      map[string]int64 `json:"io_write"`
+	IoWriteTotal int64            `json:"io_write_total"`
+	NetSent      map[string]int64 `json:"net_sent"`
+	NetSentTotal int64            `json:"net_sent_total"`
+	NetRecv      map[string]int64 `json:"net_recv"`
+	NetRecvTotal int64            `json:"net_recv_total"`
 }
 
-type StatsWeight struct {
-	load_w float64
-	io_read_w float64
-	io_write_w float64
-	net_w float64
+type StatConfig struct {
+	load bool
+	io   bool
+	net  bool
+
+	lastIoReadCount  map[string]int64
+	lastIoWriteCount map[string]int64
+	lastNetSentBytes map[string]int64
+	lastNetRecvBytes map[string]int64
 }
 
-func getAllStats() (StatSet) {
+func getStats(c *StatConfig) *StatSet {
+	s := &StatSet{}
+	s.Ts = time.Now()
+
+	if c.load {
+		s.Load = getLoad()
+	}
+
+	if c.io {
+		ret, err := disk.IOCounters()
+		if err != nil {
+			panic(err)
+		}
+
+		s.IoRead = getReadCounts(ret, c)
+		for _, rv := range s.IoRead {
+			s.IoReadTotal += rv
+		}
+		s.IoWrite = getWriteCounts(ret, c)
+		for _, wv := range s.IoWrite {
+			s.IoWriteTotal += wv
+		}
+	}
+
+	if c.net {
+		netRet, netErr := net.IOCounters(false)
+		if netErr != nil {
+			panic(netErr)
+		}
+
+		s.NetSent = getSentBytes(netRet, c)
+		for _, sv := range s.NetSent {
+			s.NetSentTotal += sv
+		}
+
+		s.NetRecv = getRecvBytes(netRet, c)
+		for _, rv := range s.NetRecv {
+			s.NetRecvTotal += rv
+		}
+	}
+
+	return s
+}
+
+func getLoad() float64 {
 	avg, loadErr := load.Avg()
-	if (loadErr != nil) {
+	if loadErr != nil {
 		panic(loadErr)
 	}
 
-	ret, diskErr := disk.IOCounters()
-	if (diskErr != nil) {
-		panic(diskErr)
-	}
-	fmt.Print(ret)
-
-	return StatSet{avg.Load1,0,0,0}
+	return avg.Load1
 }
 
-func (s StatSet) weight(w StatsWeight) (float64) {
-	ret := float64(0)
-	ret += s.load * w.load_w
-	ret += s.io_read * w.io_read_w
-	ret += s.io_write * w.io_write_w
-	ret += s.net * w.net_w
+func getReadCounts(ret map[string]disk.IOCountersStat, c *StatConfig) map[string]int64 {
+	r := make(map[string]int64)
 
-	return ret
+	for key, d := range ret {
+		if c.lastIoReadCount[key] > 0 {
+			r[key] = int64(d.ReadCount) - c.lastIoReadCount[key]
+		}
+		c.lastIoReadCount[key] = int64(d.ReadCount)
+	}
+
+	return r
+}
+
+func getWriteCounts(ret map[string]disk.IOCountersStat, c *StatConfig) map[string]int64 {
+	r := make(map[string]int64)
+
+	for key, d := range ret {
+		if c.lastIoWriteCount[key] > 0 {
+			r[key] = int64(d.WriteCount) - c.lastIoWriteCount[key]
+		}
+		c.lastIoWriteCount[key] = int64(d.WriteCount)
+	}
+
+	return r
+}
+
+func getSentBytes(ret []net.IOCountersStat, c *StatConfig) map[string]int64 {
+	r := make(map[string]int64)
+
+	for _, d := range ret {
+		if c.lastNetSentBytes[d.Name] > 0 {
+			r[d.Name] = int64(d.BytesSent) - c.lastNetSentBytes[d.Name]
+		}
+		c.lastNetSentBytes[d.Name] = int64(d.BytesSent)
+	}
+
+	return r
+}
+
+func getRecvBytes(ret []net.IOCountersStat, c *StatConfig) map[string]int64 {
+	r := make(map[string]int64)
+
+	for _, d := range ret {
+		if c.lastNetRecvBytes[d.Name] > 0 {
+			r[d.Name] = int64(d.BytesRecv) - c.lastNetRecvBytes[d.Name]
+		}
+		c.lastNetRecvBytes[d.Name] = int64(d.BytesRecv)
+	}
+
+	return r
 }
