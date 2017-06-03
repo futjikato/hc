@@ -4,22 +4,9 @@ import (
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/load"
 	"github.com/shirou/gopsutil/net"
+	"github.com/futjikato/docker-sc/types"
 	"time"
 )
-
-type StatSet struct {
-	Ts time.Time `json:"time"`
-
-	Load         float64          `json:"load"`
-	IoRead       map[string]int64 `json:"io_read"`
-	IoReadTotal  int64            `json:"io_read_total"`
-	IoWrite      map[string]int64 `json:"io_write"`
-	IoWriteTotal int64            `json:"io_write_total"`
-	NetSent      map[string]int64 `json:"net_sent"`
-	NetSentTotal int64            `json:"net_sent_total"`
-	NetRecv      map[string]int64 `json:"net_recv"`
-	NetRecvTotal int64            `json:"net_recv_total"`
-}
 
 type StatConfig struct {
 	load bool
@@ -32,8 +19,8 @@ type StatConfig struct {
 	lastNetRecvBytes map[string]int64
 }
 
-func getStats(c *StatConfig) *StatSet {
-	s := &StatSet{}
+func getStats(c *StatConfig) *types.StatSet {
+	s := &types.StatSet{}
 	s.Ts = time.Now()
 
 	if c.load {

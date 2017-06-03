@@ -7,6 +7,8 @@ import (
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
 	"path/filepath"
+	"github.com/futjikato/docker-sc/types"
+	"net"
 )
 
 func main() {
@@ -14,7 +16,10 @@ func main() {
 	no_io := flag.Bool("S", false, "Do not collect disk IO information.")
 	no_net := flag.Bool("N", false, "Do not collect network information.")
 
-	db_path := flag.String("db", "./", "Path to directory in witch to save config.db sqlite3 file")
+	db_path := flag.String("db", "./", "Path to directory in witch to save config.db sqlite3 file.")
+
+	collectorHost := flag.String("cHost", "127.0.0.1", "Host of the stats collector service.")
+	collectorPort := flag.Int("cPort", 41825, "Port the colelctor is listening on.")
 
 	flag.Parse()
 
@@ -39,6 +44,7 @@ func main() {
 
 	saveConfig(db, c)
 	saveStats(db, s)
+	sendStats(s, *collectorHost, *collectorPort)
 	fmt.Print(*s)
 }
 
@@ -47,7 +53,6 @@ func initDatabase(db *sql.DB) {
 		CREATE TABLE IF NOT EXISTS config_io(name TEXT PRIMARY KEY, read_count integer, write_count integer);
 		CREATE TABLE IF NOT EXISTS config_net(name TEXT PRIMARY KEY, bytes_sent integer, bytes_recv integer);
 		CREATE TABLE IF NOT EXISTS stats(id integer PRIMARY KEY, payload TEXT);
-		DELETE FROM stats;
 	`
 	_, err := db.Exec(sql_stmt)
 	if err != nil {
@@ -126,8 +131,8 @@ func saveConfig(db *sql.DB, c *StatConfig) {
 	}
 }
 
-func saveStats(db *sql.DB, s *StatSet) {
-	stmt, err := db.Prepare("INSERT INTO stats (id, payload) VALUES (?,?)")
+func saveStats(db *sql.DB, s *types.StatSet) {
+	stmt, err := db.Prepare("INSERT INTO stats (payload) VALUES (?)")
 	if err != nil {
 		panic(err)
 	}
@@ -137,5 +142,31 @@ func saveStats(db *sql.DB, s *StatSet) {
 	if jsonErr != nil {
 		panic(jsonErr)
 	}
-	stmt.Exec(nil, string(b))
+	stmt.Exec(string(b))
+}
+
+func sendStats(s *types.StatSet, host string, port int) {
+	con, err := net.DialUDP("udp4", getLocalAddress(), getRemoteAddress(host, port))
+	if err != nil {
+		panic(err)
+	}
+
+	b, jsonErr := json.Marshal(*s)
+	if jsonErr != nil {
+		panic(jsonErr)
+	}
+	con.Write(b)
+}
+
+func getLocalAddress() (*net.UDPAddr) {
+	return &net.UDPAddr{}
+}
+
+func getRemoteAddress(host string, port int) (*net.UDPAddr) {
+	addr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", host, port))
+	if err != nil {
+		panic(err)
+	}
+
+	return addr
 }
